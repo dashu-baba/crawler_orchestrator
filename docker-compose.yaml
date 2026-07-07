@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:17
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - orch
+
+  minio:
+    image: minio/minio
+    env_file:
+      - .env
+    command: ["server", "--console-address", ":9001", "/data"]
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-volume:/data
+    # No healthcheck here: the minio/minio server image has neither curl/wget
+    # nor mc, so an in-container check is unreliable. Readiness is gated by the
+    # createbuckets init container's mc retry loop below instead.
+    networks:
+      - orch
+
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      - minio
+    env_file:
+      - .env
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; do
+        echo 'waiting for minio...'; sleep 2;
+      done &&
+      mc mb --ignore-existing local/$${MINIO_BUCKET} &&
+      echo 'bucket ready'
+      "
+    restart: "no"
+    networks:
+      - orch
+
+volumes:
+  pgdata:
+  minio-volume:
+
+networks:
+  orch:
+    name: crawler_orch   # explicit name so DockerProvisioner can attach workers to it later

@@ -1,0 +1,15 @@
+# Secrets — never commit real env files
+.env
+.env.local
+.env.*.local
+
+# Go
+/bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# Editor / OS
+.DS_Store
+*.swp
