@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/dashu-baba/crawler-orchestrator/internal/db"
@@ -23,7 +25,7 @@ func main() {
 func run() error {
 	cfg, err := worker.Load()
 	if err != nil {
-		return fmt.Errorf("loading config error: %w", err)
+		return fmt.Errorf("loading config: %w", err)
 	}
 
 	slog.Info("worker config loaded",
@@ -33,14 +35,16 @@ func run() error {
 		"lease_duration", cfg.LeaseDuration,
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), dbConnectTimeout)
-	pool, err := db.NewPool(ctx, cfg.DBURL)
+	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
+	dbCtx, cancel := context.WithTimeout(rootCtx, dbConnectTimeout)
+	pool, err := db.NewPool(dbCtx, cfg.DBURL)
 	cancel()
 	if err != nil {
 		return fmt.Errorf("db error: %w", err)
 	}
 	defer pool.Close()
 
-	return nil
+	return worker.Run(rootCtx, pool, cfg)
 }
