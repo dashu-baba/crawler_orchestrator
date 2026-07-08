@@ -1,17 +1,29 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
+	"github.com/dashu-baba/crawler-orchestrator/internal/db"
 	"github.com/dashu-baba/crawler-orchestrator/internal/worker"
 )
 
+const dbConnectTimeout = 10 * time.Second
+
 func main() {
+	if err := run(); err != nil {
+		slog.Error("Worker exited", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	cfg, err := worker.Load()
 	if err != nil {
-		slog.Error("loading config", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("loading config error: %w", err)
 	}
 
 	slog.Info("worker config loaded",
@@ -20,4 +32,15 @@ func main() {
 		"categories", cfg.Categories,
 		"lease_duration", cfg.LeaseDuration,
 	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), dbConnectTimeout)
+	pool, err := db.NewPool(ctx, cfg.DBURL)
+
+	cancel()
+	if err != nil {
+		return fmt.Errorf("db error: %w", err)
+	}
+	defer pool.Close()
+
+	return nil
 }

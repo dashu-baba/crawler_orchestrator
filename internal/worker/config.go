@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-/*
- */
 type Config struct {
 	RunID         int64
 	WorkerID      string
@@ -21,65 +19,62 @@ type Config struct {
 
 func Load() (Config, error) {
 	var errs []error
-	runIdVal, err := requireEnv("RUN_ID")
-	if err != nil {
+	cfg := Config{}
+
+	if runIDVal, err := requireEnv("RUN_ID"); err != nil {
 		errs = append(errs, err)
+	} else if runID, perr := strconv.ParseInt(runIDVal, 10, 64); perr != nil {
+		errs = append(errs, fmt.Errorf("parsing RUN_ID: %w", perr))
+	} else {
+		cfg.RunID = runID
 	}
 
-	runId, err := strconv.ParseInt(runIdVal, 10, 64)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("parsing RUN_ID: %w", err))
-	}
-
-	workerId, err := requireEnv("WORKER_ID")
-	if err != nil {
+	if workerID, err := requireEnv("WORKER_ID"); err != nil {
 		errs = append(errs, err)
+	} else {
+		cfg.WorkerID = workerID
 	}
 
-	categoriesVal, err := requireEnv("CATEGORIES")
-	if err != nil {
+	if categoriesVal, err := requireEnv("CATEGORIES"); err != nil {
 		errs = append(errs, err)
-	}
-
-	parts := strings.Split(categoriesVal, ",")
-	categories := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
+	} else {
+		parts := strings.Split(categoriesVal, ",")
+		categories := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			categories = append(categories, p)
 		}
-		categories = append(categories, p)
+
+		if len(categories) == 0 {
+			errs = append(errs, errors.New("CATEGORIES must contain at least one category"))
+		} else {
+			cfg.Categories = categories
+		}
 	}
 
-	if len(categories) == 0 {
-		errs = append(errs, errors.New("CATEGORIES must contain at least one category"))
-	}
-
-	dbUrl, err := requireEnv("DB_URL")
-	if err != nil {
+	if dbURL, err := requireEnv("DB_URL"); err != nil {
 		errs = append(errs, err)
+	} else {
+		cfg.DBURL = dbURL
 	}
 
 	leaseDurationVal := envOrDefault("LEASE_DURATION", "90s")
-	leaseDuration, err := time.ParseDuration(leaseDurationVal)
-	if err != nil {
+	if leaseDuration, err := time.ParseDuration(leaseDurationVal); err != nil {
 		errs = append(errs, fmt.Errorf("parsing LEASE_DURATION: %w", err))
-	}
-	if leaseDuration <= 0 {
+	} else if leaseDuration <= 0 {
 		errs = append(errs, errors.New("lease duration can't be less than 1"))
+	} else {
+		cfg.LeaseDuration = leaseDuration
 	}
 
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
 
-	return Config{
-		RunID:         runId,
-		WorkerID:      workerId,
-		Categories:    categories,
-		DBURL:         dbUrl,
-		LeaseDuration: leaseDuration,
-	}, nil
+	return cfg, nil
 }
 
 func requireEnv(key string) (string, error) {
