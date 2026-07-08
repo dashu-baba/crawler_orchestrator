@@ -1,10 +1,10 @@
 services:
   postgres:
-    image: postgres:17
+    image: postgres:17.10
     env_file:
       - .env
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"   # loopback only — not exposed to the LAN
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -16,13 +16,13 @@ services:
       - orch
 
   minio:
-    image: minio/minio
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     env_file:
       - .env
     command: ["server", "--console-address", ":9001", "/data"]
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"   # loopback only
+      - "127.0.0.1:9001:9001"   # loopback only
     volumes:
       - minio-volume:/data
     # No healthcheck here: the minio/minio server image has neither curl/wget
@@ -32,7 +32,7 @@ services:
       - orch
 
   createbuckets:
-    image: minio/mc
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       - minio
     env_file:
@@ -44,6 +44,28 @@ services:
       done &&
       mc mb --ignore-existing local/$${MINIO_BUCKET} &&
       echo 'bucket ready'
+      "
+    restart: "no"
+    networks:
+      - orch
+
+  # Applies pending SQL migrations, then exits. Idempotent: on later `up` it
+  # sees nothing pending and does nothing. This is the LOCAL migration runner;
+  # in prod the orchestrator binary runs the same migrations on startup.
+  migrate:
+    image: migrate/migrate:v4.19.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./migrations:/migrations:ro
+    entrypoint: >
+      /bin/sh -c "
+      migrate -path=/migrations
+      -database postgres://$${POSTGRES_USER}:$${POSTGRES_PASSWORD}@postgres:5432/$${POSTGRES_DB}?sslmode=disable
+      up
       "
     restart: "no"
     networks:
