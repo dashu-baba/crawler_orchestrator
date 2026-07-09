@@ -10,6 +10,9 @@
 *.out
 vendor/
 
+# Cross-compiled worker binary staged for the Hetzner snapshot build
+/dist/
+
 # Editor / OS
 .DS_Store
 *.swp

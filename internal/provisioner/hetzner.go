@@ -29,6 +29,14 @@ type HetznerConfig struct {
 	Location   string   // e.g. "nbg1"; empty lets Hetzner pick
 	SSHKeys    []string // key names/IDs to install for operator access
 
+	// PrivateNetworkID attaches every worker to this Hetzner private
+	// network (in addition to its normal public IP, which workers keep
+	// for crawl IP-diversity -- see doc/orchestrator-design.md §4.2). It
+	// lets workers reach Postgres/Object Storage over the private
+	// network instead of the public internet, so those services never
+	// need a public-facing DB port. Zero means "no private network".
+	PrivateNetworkID int64
+
 	// TTLBuffer is added to DeadlineSeconds to compute each VM's
 	// self-destruct time -- the belt-and-suspenders guardrail against an
 	// orchestrator crash leaving VMs running (CLAUDE.md cost guardrails).
@@ -122,6 +130,18 @@ func (p *HetznerProvisioner) do(ctx context.Context, method, path string, body a
 	return resp.StatusCode, nil
 }
 
+// imageParam renders the value for the Hetzner "image" field. A pre-baked
+// snapshot is referenced by its numeric ID, which the API expects as a JSON
+// integer -- a quoted string is rejected. A stock system image (e.g.
+// "ubuntu-24.04") is referenced by name, a string. So: send an int when the
+// configured image is all digits, otherwise a string.
+func imageParam(image string) any {
+	if id, err := strconv.ParseInt(image, 10, 64); err == nil {
+		return id
+	}
+	return image
+}
+
 // Create boots n worker servers for runID from the pre-baked snapshot in
 // cfg.Image, tagged role=worker/run_id=<runID> so List/Reconcile can find
 // them later. Each VM gets its own cloud-init user_data embedding the env
@@ -143,7 +163,7 @@ func (p *HetznerProvisioner) Create(ctx context.Context, runID int64, n int) ([]
 		reqBody := map[string]any{
 			"name":        name,
 			"server_type": p.cfg.ServerType,
-			"image":       p.cfg.Image,
+			"image":       imageParam(p.cfg.Image),
 			"user_data":   userData,
 			"labels": map[string]string{
 				"role":   "worker",
@@ -155,6 +175,9 @@ func (p *HetznerProvisioner) Create(ctx context.Context, runID int64, n int) ([]
 		}
 		if len(p.cfg.SSHKeys) > 0 {
 			reqBody["ssh_keys"] = p.cfg.SSHKeys
+		}
+		if p.cfg.PrivateNetworkID != 0 {
+			reqBody["networks"] = []int64{p.cfg.PrivateNetworkID}
 		}
 
 		var out struct {
