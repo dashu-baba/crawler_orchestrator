@@ -133,6 +133,17 @@ func Load() (Config, error) {
 		// Location is optional -- an empty string lets Hetzner pick.
 		cfg.Hetzner.Location = envOrDefault("HETZNER_LOCATION", "")
 
+		// Private network is optional -- 0 means workers only get their
+		// public IP, no private attachment.
+		if privateNetworkIDVal := envOrDefault("HETZNER_PRIVATE_NETWORK_ID", ""); privateNetworkIDVal != "" {
+			privateNetworkID, err := strconv.ParseInt(privateNetworkIDVal, 10, 64)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("parsing HETZNER_PRIVATE_NETWORK_ID: %w", err))
+			} else {
+				cfg.Hetzner.PrivateNetworkID = privateNetworkID
+			}
+		}
+
 		if sshKeysVal := envOrDefault("HETZNER_SSH_KEYS", ""); sshKeysVal != "" {
 			parts := strings.Split(sshKeysVal, ",")
 			keys := make([]string, 0, len(parts))
