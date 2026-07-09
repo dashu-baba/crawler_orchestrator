@@ -1,10 +1,27 @@
 package provisioner
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type WorkerHandle struct {
 	ID    string
 	RunID int64
+}
+
+type Config struct {
+	Image          string
+	Network        string
+	DBURL          string
+	MinIOEndpoint  string
+	MinIOAccessKey string
+	MinIOSecretKey string
+	MinIOBucket    string
+	MinIOUseSSL    bool
+	Categories     []string
+	LeaseDuration  time.Duration
+	MaxAttempts    int
 }
 
 type Provisioner interface {
