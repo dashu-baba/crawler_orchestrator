@@ -41,7 +41,13 @@ func run() error {
 	}
 	defer pool.Close()
 
-	prov := provisioner.NewDockerProvisioner(cfg.Provisioner)
+	var prov provisioner.Provisioner
+	switch cfg.ProvisionerKind {
+	case "hetzner":
+		prov = provisioner.NewHetznerProvisioner(cfg.Hetzner)
+	default:
+		prov = provisioner.NewDockerProvisioner(cfg.Provisioner)
+	}
 
 	if err := orchestrator.Reconcile(ctx, pool, prov); err != nil {
 		return fmt.Errorf("reconciling orphaned workers: %w", err)

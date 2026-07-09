@@ -20,7 +20,12 @@ type Config struct {
 	MinWorkers      int
 	MaxWorkers      int
 	MonitorInterval time.Duration
+
+	// ProvisionerKind selects which Provisioner cmd/orchestrator wires up:
+	// "docker" (local dev, no cloud spend) or "hetzner" (prod).
+	ProvisionerKind string
 	Provisioner     provisioner.Config
+	Hetzner         provisioner.HetznerConfig
 }
 
 // Load reads and validates a Config from env vars, accumulating every
@@ -35,6 +40,15 @@ func Load() (Config, error) {
 	} else {
 		cfg.DBURL = dbURL
 		cfg.Provisioner.DBURL = dbURL
+		cfg.Hetzner.DBURL = dbURL
+	}
+
+	provisionerKindVal := envOrDefault("PROVISIONER", "docker")
+	switch provisionerKindVal {
+	case "docker", "hetzner":
+		cfg.ProvisionerKind = provisionerKindVal
+	default:
+		errs = append(errs, fmt.Errorf("PROVISIONER must be \"docker\" or \"hetzner\", got %q", provisionerKindVal))
 	}
 
 	if deadline, err := parseFloatEnv("DEADLINE_SECONDS", "14400"); err != nil {
@@ -43,6 +57,7 @@ func Load() (Config, error) {
 		errs = append(errs, errors.New("DEADLINE_SECONDS must be > 0"))
 	} else {
 		cfg.DeadlineSeconds = deadline
+		cfg.Hetzner.DeadlineSeconds = deadline
 	}
 
 	if avgItem, err := parseFloatEnv("AVG_ITEM_SECONDS", "1"); err != nil {
@@ -82,16 +97,61 @@ func Load() (Config, error) {
 		cfg.MonitorInterval = monitorInterval
 	}
 
-	if image, err := requireEnv("WORKER_IMAGE"); err != nil {
-		errs = append(errs, err)
-	} else {
-		cfg.Provisioner.Image = image
+	if cfg.ProvisionerKind == "docker" {
+		if image, err := requireEnv("WORKER_IMAGE"); err != nil {
+			errs = append(errs, err)
+		} else {
+			cfg.Provisioner.Image = image
+		}
+
+		if network, err := requireEnv("WORKER_NETWORK"); err != nil {
+			errs = append(errs, err)
+		} else {
+			cfg.Provisioner.Network = network
+		}
 	}
 
-	if network, err := requireEnv("WORKER_NETWORK"); err != nil {
-		errs = append(errs, err)
-	} else {
-		cfg.Provisioner.Network = network
+	if cfg.ProvisionerKind == "hetzner" {
+		if token, err := requireEnv("HETZNER_API_TOKEN"); err != nil {
+			errs = append(errs, err)
+		} else {
+			cfg.Hetzner.APIToken = token
+		}
+
+		if serverType, err := requireEnv("HETZNER_SERVER_TYPE"); err != nil {
+			errs = append(errs, err)
+		} else {
+			cfg.Hetzner.ServerType = serverType
+		}
+
+		if image, err := requireEnv("HETZNER_IMAGE"); err != nil {
+			errs = append(errs, err)
+		} else {
+			cfg.Hetzner.Image = image
+		}
+
+		// Location is optional -- an empty string lets Hetzner pick.
+		cfg.Hetzner.Location = envOrDefault("HETZNER_LOCATION", "")
+
+		if sshKeysVal := envOrDefault("HETZNER_SSH_KEYS", ""); sshKeysVal != "" {
+			parts := strings.Split(sshKeysVal, ",")
+			keys := make([]string, 0, len(parts))
+			for _, k := range parts {
+				if k = strings.TrimSpace(k); k != "" {
+					keys = append(keys, k)
+				}
+			}
+			cfg.Hetzner.SSHKeys = keys
+		}
+
+		ttlBufferVal := envOrDefault("HETZNER_TTL_BUFFER", "300s")
+		if ttlBuffer, err := time.ParseDuration(ttlBufferVal); err != nil {
+			errs = append(errs, fmt.Errorf("parsing HETZNER_TTL_BUFFER: %w", err))
+		} else if ttlBuffer < 0 {
+			errs = append(errs, errors.New("HETZNER_TTL_BUFFER can't be negative"))
+		} else {
+			cfg.Hetzner.TTLBuffer = ttlBuffer
+		}
 	}
 
 	if categoriesVal, err := requireEnv("CATEGORIES"); err != nil {
@@ -111,6 +171,7 @@ func Load() (Config, error) {
 			errs = append(errs, errors.New("CATEGORIES must contain at least one category"))
 		} else {
 			cfg.Provisioner.Categories = categories
+			cfg.Hetzner.Categories = categories
 		}
 	}
 
@@ -121,6 +182,7 @@ func Load() (Config, error) {
 		errs = append(errs, errors.New("lease duration can't be less than 1"))
 	} else {
 		cfg.Provisioner.LeaseDuration = leaseDuration
+		cfg.Hetzner.LeaseDuration = leaseDuration
 	}
 
 	if maxAttempts, err := parseIntEnv("MAX_ATTEMPTS", "5"); err != nil {
@@ -129,30 +191,35 @@ func Load() (Config, error) {
 		errs = append(errs, errors.New("MAX_ATTEMPTS can't be less than 1"))
 	} else {
 		cfg.Provisioner.MaxAttempts = maxAttempts
+		cfg.Hetzner.MaxAttempts = maxAttempts
 	}
 
 	if minioEndpoint, err := requireEnv("MINIO_ENDPOINT"); err != nil {
 		errs = append(errs, err)
 	} else {
 		cfg.Provisioner.MinIOEndpoint = minioEndpoint
+		cfg.Hetzner.MinIOEndpoint = minioEndpoint
 	}
 
 	if minioAccessKey, err := requireEnv("MINIO_ACCESS_KEY"); err != nil {
 		errs = append(errs, err)
 	} else {
 		cfg.Provisioner.MinIOAccessKey = minioAccessKey
+		cfg.Hetzner.MinIOAccessKey = minioAccessKey
 	}
 
 	if minioSecretKey, err := requireEnv("MINIO_SECRET_KEY"); err != nil {
 		errs = append(errs, err)
 	} else {
 		cfg.Provisioner.MinIOSecretKey = minioSecretKey
+		cfg.Hetzner.MinIOSecretKey = minioSecretKey
 	}
 
 	if minioBucket, err := requireEnv("MINIO_BUCKET"); err != nil {
 		errs = append(errs, err)
 	} else {
 		cfg.Provisioner.MinIOBucket = minioBucket
+		cfg.Hetzner.MinIOBucket = minioBucket
 	}
 
 	minioUseSSLVal := envOrDefault("MINIO_USE_SSL", "false")
@@ -160,6 +227,7 @@ func Load() (Config, error) {
 		errs = append(errs, fmt.Errorf("parsing MINIO_USE_SSL: %w", err))
 	} else {
 		cfg.Provisioner.MinIOUseSSL = minioUseSSL
+		cfg.Hetzner.MinIOUseSSL = minioUseSSL
 	}
 
 	if len(errs) > 0 {
