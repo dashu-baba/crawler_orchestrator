@@ -267,10 +267,29 @@ type Provisioner interface {
 
 ## 11. Build order (suggested)
 
-1. Schema + claim query + idempotent write path (pure Postgres, no cloud).
-2. Worker binary with the goroutine-per-category loop + retry/backoff/dead-letter.
-3. `DockerProvisioner` + docker-compose + the 5 local tests above. **Prove correctness here.**
-4. Orchestrator sizing + monitor + teardown.
-5. `HetznerProvisioner` + pre-baked snapshot + TTL + reconciliation.
-6. Structured logging/metrics throughout.
-7. Deploy: orchestrator on one small always-on VM; workers ephemeral.
+Status legend (as of 2026-07-10): ✅ done · 🟡 partial · ⬜ not started.
+
+1. ✅ Schema + claim query + idempotent write path (pure Postgres, no cloud).
+2. 🟡 Worker binary with the goroutine-per-category loop + retry/backoff/dead-letter.
+   Loop, lease-reclaim retry, and dead-lettering are done. **Gaps:** `process()`
+   is still a fake (sleeps + always succeeds; no real fetch/transform), and
+   per-host exponential backoff + jitter on 429/503 (§6) is not implemented —
+   both deferred with the mock-upstream work in step 3.
+3. 🟡 `DockerProvisioner` + docker-compose + the 5 local tests above. **Prove correctness here.**
+   `DockerProvisioner` and the compose stack are done. **Gaps:** no `mock-upstream`
+   service, and none of the 5 acceptance tests exist yet — the core is not yet
+   proven per this step's own bar.
+4. ✅ Orchestrator sizing + monitor + teardown.
+5. 🟡 `HetznerProvisioner` + pre-baked snapshot + TTL + reconciliation.
+   `HetznerProvisioner` (Create/Destroy/List) is implemented and verified against
+   the live API; cloud-init TTL self-destruct and reconciliation are done. Snapshot
+   build tooling exists (`packer/worker-snapshot.pkr.hcl` + `scripts/build-snapshot.sh`).
+   **Gap:** the tooling has not been run to produce a real snapshot / boot a worker
+   from it.
+6. 🟡 Structured logging/metrics throughout.
+   `slog` structured logging is threaded through; the monitor emits items/sec.
+   **Gap:** the named metrics from §8 (claim latency, lease-reclaim count,
+   dead-letter rate) are not emitted.
+7. 🟡 Deploy: orchestrator on one small always-on VM; workers ephemeral.
+   Orchestrator is dockerized (`Dockerfile.orchestrator`, prod/Hetzner build).
+   **Gap:** no actual deployment (always-on VM provisioning, running it there).
