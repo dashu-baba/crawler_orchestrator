@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -52,15 +53,24 @@ func runCategory(ctx context.Context, pool *pgxpool.Pool, minioClient *minio.Cli
 			continue
 		}
 
-		slog.Info("claimed job", "category", category, "job_id", job.ID, "url", job.URL)
+		slog.Info("claimed job", "category", category, "job_id", job.ID, "url", job.URL, "attempts", job.Attempts)
+
+		// Defensive: a job can only arrive here already over budget if a
+		// previous failure on its final attempt didn't get dead-lettered
+		// (e.g. this worker crashed before handleFailure ran). Catch it
+		// before wasting a process/write cycle on it.
+		if int(job.Attempts) > cfg.MaxAttempts {
+			deadLetter(ctx, pool, category, job, fmt.Errorf("exceeded max attempts (%d)", cfg.MaxAttempts))
+			continue
+		}
 
 		payload, err := process(ctx, job)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			// Leave the job leased; its lease expires and it gets reclaimed.
 			slog.Error("process failed", "category", category, "job_id", job.ID, "error", err)
+			handleFailure(ctx, pool, category, cfg, job, err)
 			continue
 		}
 
@@ -69,6 +79,7 @@ func runCategory(ctx context.Context, pool *pgxpool.Pool, minioClient *minio.Cli
 				return nil
 			}
 			slog.Error("write failed", "category", category, "job_id", job.ID, "error", err)
+			handleFailure(ctx, pool, category, cfg, job, err)
 			continue
 		}
 
@@ -77,9 +88,38 @@ func runCategory(ctx context.Context, pool *pgxpool.Pool, minioClient *minio.Cli
 				return nil
 			}
 			slog.Error("ack failed", "category", category, "job_id", job.ID, "error", err)
+			handleFailure(ctx, pool, category, cfg, job, err)
 			continue
 		}
 
 		slog.Info("job done", "category", category, "job_id", job.ID)
 	}
+}
+
+// handleFailure decides what a failed attempt means for the job's future:
+// if this was already its last permitted attempt, dead-letter it now
+// rather than leaving it leased to expire and get reclaimed just to be
+// dead-lettered on the next pass. Otherwise, just record the error and
+// leave it leased for retry.
+func handleFailure(ctx context.Context, pool *pgxpool.Pool, category string, cfg Config, job *Job, cause error) {
+	if int(job.Attempts) >= cfg.MaxAttempts {
+		deadLetter(ctx, pool, category, job, cause)
+		return
+	}
+
+	if err := RecordFailure(ctx, pool, job.ID, cause); err != nil {
+		slog.Error("recording failure failed", "category", category, "job_id", job.ID, "error", err)
+	}
+}
+
+// deadLetter is a best-effort wrapper around DeadLetter: if dead-lettering
+// itself fails, that's logged but never propagated, since it shouldn't
+// crash the worker — the job just gets picked up again once its lease
+// expires and gets caught by the same check next time.
+func deadLetter(ctx context.Context, pool *pgxpool.Pool, category string, job *Job, cause error) {
+	if err := DeadLetter(ctx, pool, job.ID, cause); err != nil {
+		slog.Error("dead-letter failed", "category", category, "job_id", job.ID, "error", err)
+		return
+	}
+	slog.Warn("job dead-lettered", "category", category, "job_id", job.ID, "attempts", job.Attempts, "cause", cause)
 }

@@ -19,3 +19,28 @@ func Ack(ctx context.Context, pool *pgxpool.Pool, jobID int64) error {
 
 	return nil
 }
+
+// RecordFailure records the error from a failed attempt without changing
+// the job's status. The job stays 'leased' and is retried once its lease
+// expires; this just leaves a trail for whoever's debugging a job that
+// keeps failing.
+func RecordFailure(ctx context.Context, pool *pgxpool.Pool, jobID int64, lastErr error) error {
+	_, err := pool.Exec(ctx, `UPDATE jobs SET last_error = $2, updated_at = now() WHERE id = $1`, jobID, lastErr.Error())
+	if err != nil {
+		return fmt.Errorf("recording failure for job %d: %w", jobID, err)
+	}
+
+	return nil
+}
+
+// DeadLetter marks a job dead after it has exceeded max_attempts. The run
+// still completes; a dead job is a first-class terminal state, not lost
+// work — see CLAUDE.md's job state machine.
+func DeadLetter(ctx context.Context, pool *pgxpool.Pool, jobID int64, lastErr error) error {
+	_, err := pool.Exec(ctx, `UPDATE jobs SET status = 'dead', last_error = $2, updated_at = now() WHERE id = $1`, jobID, lastErr.Error())
+	if err != nil {
+		return fmt.Errorf("dead-lettering job %d: %w", jobID, err)
+	}
+
+	return nil
+}

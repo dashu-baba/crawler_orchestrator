@@ -16,6 +16,7 @@ type Config struct {
 	Categories     []string
 	DBURL          string
 	LeaseDuration  time.Duration
+	MaxAttempts    int
 	MinIOEndpoint  string
 	MinIOAccessKey string
 	MinIOSecretKey string
@@ -78,6 +79,15 @@ func Load() (Config, error) {
 		errs = append(errs, errors.New("lease duration can't be less than 1"))
 	} else {
 		cfg.LeaseDuration = leaseDuration
+	}
+
+	maxAttemptsVal := envOrDefault("MAX_ATTEMPTS", "5")
+	if maxAttempts, err := strconv.Atoi(maxAttemptsVal); err != nil {
+		errs = append(errs, fmt.Errorf("parsing MAX_ATTEMPTS: %w", err))
+	} else if maxAttempts <= 0 {
+		errs = append(errs, errors.New("max attempts can't be less than 1"))
+	} else {
+		cfg.MaxAttempts = maxAttempts
 	}
 
 	if minioEndpoint, err := requireEnv("MINIO_ENDPOINT"); err != nil {
