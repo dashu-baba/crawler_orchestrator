@@ -1,0 +1,13 @@
+# Fires crawler-orchestrator.service once daily. Adjust OnCalendar to when
+# you actually want the 4h run window to start.
+
+[Unit]
+Description=Run crawl orchestrator daily
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

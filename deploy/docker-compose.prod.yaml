@@ -1,0 +1,79 @@
+# Prod compose for the always-on VM: Postgres + migrations + the
+# orchestrator container. No MinIO here -- prod points MINIO_ENDPOINT at
+# Hetzner Object Storage (S3-compatible) instead of self-hosting it (see
+# the cost discussion in doc/orchestrator-design.md history / commit log).
+#
+# Unlike local dev, Postgres must be reachable from worker VMs over the
+# Hetzner private network (workers keep their public IP for crawl
+# IP-diversity; the private network is how they reach this VM's Postgres
+# without exposing it publicly -- see HETZNER_PRIVATE_NETWORK_ID). So
+# POSTGRES_BIND_ADDR here should be this VM's private network IP, not
+# 127.0.0.1 -- see deploy/README.md.
+#
+# Run from the repo root:
+#   docker compose -f deploy/docker-compose.prod.yaml --profile manual run --rm migrate
+#   docker compose -f deploy/docker-compose.prod.yaml up -d postgres
+#   docker compose -f deploy/docker-compose.prod.yaml --profile manual run --rm orchestrator
+#
+# The `manual` profile keeps migrate/orchestrator from starting on a plain
+# `up` -- they're one-shot, triggered explicitly (the systemd timer does
+# this for orchestrator; migrate is a deploy-time step, not a recurring one).
+
+services:
+  postgres:
+    image: postgres:17.10
+    env_file:
+      - ../.env
+    ports:
+      - "${POSTGRES_BIND_ADDR:-127.0.0.1}:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - orch
+
+  migrate:
+    image: migrate/migrate:v4.19.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    volumes:
+      - ../migrations:/migrations:ro
+    entrypoint: >
+      /bin/sh -c "
+      migrate -path=/migrations
+      -database postgres://$${POSTGRES_USER}:$${POSTGRES_PASSWORD}@postgres:5432/$${POSTGRES_DB}?sslmode=disable
+      up
+      "
+    restart: "no"
+    profiles:
+      - manual
+    networks:
+      - orch
+
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: Dockerfile.orchestrator
+    image: crawler-orchestrator:latest
+    env_file:
+      - ../.env
+    restart: "no"
+    profiles:
+      - manual
+    networks:
+      - orch
+
+volumes:
+  pgdata:
+
+networks:
+  orch:
+    name: crawler_orch_prod
