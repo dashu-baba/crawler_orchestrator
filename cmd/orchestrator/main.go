@@ -65,7 +65,7 @@ func run() error {
 
 	slog.Info("run provisioned", "run_id", runID, "workers", len(handles))
 
-	progress, monitorErr := orchestrator.Monitor(ctx, pool, runID, cfg.MonitorInterval)
+	progress, monitorErr := orchestrator.Monitor(ctx, pool, runID, cfg.MonitorInterval, cfg.DeadlineSeconds)
 
 	status := orchestrator.RunStatusDone
 	if monitorErr != nil {
