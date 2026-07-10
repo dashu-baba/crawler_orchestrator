@@ -291,5 +291,10 @@ Status legend (as of 2026-07-10): ✅ done · 🟡 partial · ⬜ not started.
    **Gap:** the named metrics from §8 (claim latency, lease-reclaim count,
    dead-letter rate) are not emitted.
 7. 🟡 Deploy: orchestrator on one small always-on VM; workers ephemeral.
-   Orchestrator is dockerized (`Dockerfile.orchestrator`, prod/Hetzner build).
-   **Gap:** no actual deployment (always-on VM provisioning, running it there).
+   Orchestrator is dockerized (`Dockerfile.orchestrator`). Deploy artifacts done:
+   `deploy/docker-compose.prod.yaml` (Postgres + migrate + orchestrator, combined
+   on one VM, no MinIO -- prod uses Hetzner Object Storage), systemd oneshot
+   unit + daily timer, and `deploy/README.md` runbook (private network, VM
+   creation, firewall lockdown, first-run verification). **Gap:** not actually
+   deployed to a real VM yet -- artifacts are written and compose-validated,
+   not run against live infrastructure.
