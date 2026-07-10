@@ -286,10 +286,13 @@ Status legend (as of 2026-07-10): ✅ done · 🟡 partial · ⬜ not started.
    build tooling exists (`packer/worker-snapshot.pkr.hcl` + `scripts/build-snapshot.sh`).
    **Gap:** the tooling has not been run to produce a real snapshot / boot a worker
    from it.
-6. 🟡 Structured logging/metrics throughout.
-   `slog` structured logging is threaded through; the monitor emits items/sec.
-   **Gap:** the named metrics from §8 (claim latency, lease-reclaim count,
-   dead-letter rate) are not emitted.
+6. ✅ Structured logging/metrics throughout.
+   `slog` threaded through. Monitor emits overall + per-category items/sec,
+   dead-letter rate, and projected-finish-vs-deadline (warns if a run is on
+   track to miss it). Claim emits claim latency and flags lease-reclaim
+   events (Attempts > 1) at Warn. VM count logged at provision time. All
+   verified live against the local stack by manually advancing job state
+   between poll ticks and confirming the computed rates.
 7. 🟡 Deploy: orchestrator on one small always-on VM; workers ephemeral.
    Orchestrator is dockerized (`Dockerfile.orchestrator`). Deploy artifacts done:
    `deploy/docker-compose.prod.yaml` (Postgres + migrate + orchestrator, combined
